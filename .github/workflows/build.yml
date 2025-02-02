@@ -1,6 +1,11 @@
 name: build
 
-on: [workflow_dispatch]
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - solitary/macos
 
 jobs:
   windows-msys:
@@ -79,9 +84,46 @@ jobs:
         path: Linux-${{ matrix.arch }}.7z
         if-no-files-found: error
 
+  macos:
+    name: ${{ matrix.config }} macOS ${{ matrix.arch }}
+    runs-on: macos-13
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64]
+
+    steps:
+    - name: Install MacPorts
+      run: |
+        curl -LO https://github.com/macports/macports-base/releases/download/v2.10.5/MacPorts-2.10.5-13-Ventura.pkg
+        sudo installer -pkg MacPorts-2.10.5-13-Ventura.pkg -target /
+        export PATH="/opt/local/bin:/opt/local/sbin:$PATH"
+        echo "/opt/local/bin:/opt/local/sbin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        sudo port install gtkglext pkgconfig libxml2 gtk2 pango atk gettext wget qt5
+        sudo port select --set qt qt5
+        echo "PKG_CONFIG_PATH=/opt/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Build
+      run: |
+        make -j4
+        7z a macOS-${{ matrix.arch }}.7z ./install/*
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: macOS-${{ matrix.arch }}
+        path: macOS-${{ matrix.arch }}.7z
+        if-no-files-found: error
+
   create-testing:
     if: github.ref == 'refs/heads/master' && ( github.event_name == 'push' || github.event_name == 'workflow_dispatch' )
-    needs: [windows-msys, linux]
+    needs: [windows-msys, linux, macos]
     runs-on: ubuntu-latest
     steps:
       - name: Download Artifacts
@@ -92,7 +134,7 @@ jobs:
         run: |
           mv Windows-x86_64/Windows-x86_64.zip netradiant-custom-$(date +%Y%m%d)-windows-x86_64.zip
           mv Linux-x86_64/Linux-x86_64.7z netradiant-custom-$(date +%Y%m%d)-linux-x86_64.7z
-#         note: 7z dir/* doesn't match .bla (hidden) file in linux under dir/ but matches in subfolders  # or doesn't match there now too?
+          mv macOS-x86_64/macOS-x86_64.7z netradiant-custom-$(date +%Y%m%d)-macos-x86_64.7z
 
       - name: Get current date
         run: |
